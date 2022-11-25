@@ -1,0 +1,91 @@
+---
+- name: Playbook for configure LVM
+  hosts: localhost
+  connection: local
+  vars_files:
+  - vars/vars.yaml
+
+  tasks:          
+
+
+  - name: Create allow SSH and HTTP SG Group
+    amazon.aws.ec2_group:
+      aws_profile: "{{ aws_profile }}"
+      name: allow_ssh
+      description: Allow SSH connection
+      vpc_id: "{{ default_vpc }}"
+      region: "{{ region }}"
+      rules:
+        - proto: tcp
+          from_port: 22
+          to_port: 22
+          cidr_ip: 0.0.0.0/0
+    register: sg_group
+
+  - name: Create instance
+    amazon.aws.ec2_instance:
+      aws_profile: "{{ aws_profile }}"
+      name: "{{ instance_name }}"
+      key_name: "{{ key_pair_name }}"
+      region: "{{ region }}"
+      vpc_subnet_id: "{{ default_subnet }}"   
+      instance_type: "{{ instance_type }}"
+      security_group: "{{ sg_group.group_id }}"
+      network:
+        assign_public_ip: true
+      image_id: "{{ ami }}"
+      wait: true
+    register: instance
+
+  - name: Add new instance to host group
+    add_host:
+      hostname: "{{ instance.instances[0].public_ip_address }}"
+      groupname: just_launched
+      ansible_ssh_user: ec2-user
+      ansible_ssh_private_key_file: "{{ ssh_key }}"
+
+  - name: Wait for SSH to come up
+    delegate_to: "{{ instance.instances[0].public_ip_address }}"
+    wait_for_connection:
+      delay: 5
+      timeout: 320
+
+  - name: Attach ebs volume
+    amazon.aws.ec2_vol:
+      aws_profile: "{{ aws_profile }}"
+      instance: "{{ instance.instance_ids[0] }}"
+      volume_size: 5
+      device_name: sdd
+      region: "{{ region }}"
+      delete_on_termination: true
+
+- name: playbook for simple 1 GB partition
+  hosts: just_launched
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Create a ext4 filesystem on /dev/nvme1n1
+      ignore_errors: yes
+      community.general.filesystem:
+        fstype: ext4
+        dev: /dev/nvme1n1
+      
+
+    - name: Create a volume group on top of /dev/nvme1n1.
+      community.general.lvg:
+        vg: nebo_vg
+        pvs: /dev/nvme1n1
+
+    - name: Create a logical volume on /dev/nvme1n1
+      community.general.lvol:
+        vg: nebo_vg
+        lv: nebo_lv
+        size: 1G
+        pvs: /dev/nvme1n1
+
+    - name: Mount point to /var
+      ansible.posix.mount:
+        path: /var
+        src: /dev/nvme1n1
+        fstype: ext4
+        state: mounted
