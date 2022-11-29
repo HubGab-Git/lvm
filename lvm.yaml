@@ -69,6 +69,7 @@
       community.general.filesystem:
         fstype: ext4
         dev: /dev/nvme1n1
+        force: true
       
 
     - name: Create a volume group on top of /dev/nvme1n1.
@@ -83,9 +84,11 @@
         size: 1G
         pvs: /dev/nvme1n1
 
-    - name: Mount point to /var
-      ansible.posix.mount:
-        path: /var
-        src: /dev/nvme1n1
-        fstype: ext4
-        state: mounted
+    - name: Get UUID of new disc
+      ansible.builtin.shell: sudo blkid -s UUID -o value /dev/nvme1n1
+      register: uuid
+
+    - name: Insert line to /etc/fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "UUID={{ uuid.stdout }} /var  ext4  defaults  0 2"
