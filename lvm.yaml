@@ -69,7 +69,7 @@
       community.general.filesystem:
         fstype: ext4
         dev: /dev/nvme1n1
-        force: true
+        opts: -cc
       
 
     - name: Create a volume group on top of /dev/nvme1n1.
